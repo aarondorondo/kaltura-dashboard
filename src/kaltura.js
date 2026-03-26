@@ -103,12 +103,12 @@ function isKSError(data) {
 export async function fetchViewers(session) {
   if (session.disabledServices.has('viewers')) return 0;
 
-  // Primary: liveReports/getEvents — returns live audience counts
+  // Primary: liveReports/getEvents with ENTRY_TOTAL
   try {
     const url = `${session.serviceUrl}/api_v3/service/liveReports/action/getEvents`;
     const params = new URLSearchParams({
       ks: session.currentKS,
-      reportType: 'LIVE_STREAM_STATS',
+      reportType: 'ENTRY_TOTAL',
       'filter[objectType]': 'KalturaLiveReportInputFilter',
       'filter[entryIds]': session.entryId,
       format: '1',
@@ -124,9 +124,7 @@ export async function fetchViewers(session) {
       return 0;
     }
 
-    if (isServiceForbidden(data)) {
-      // Try fallback below
-    } else if (data?.objects?.length > 0) {
+    if (!isServiceForbidden(data) && data?.objects?.length > 0) {
       const obj = data.objects[0];
       const count = obj.audience || obj.plays || obj.dve || 0;
       if (count > 0) return count;
@@ -135,40 +133,56 @@ export async function fetchViewers(session) {
     console.log('[Viewers] liveReports/getEvents error:', err.message);
   }
 
-  // Fallback: analytics/query — broader analytics API
-  try {
-    const url = `${session.serviceUrl}/api_v3/service/analytics/action/query`;
-    const now = Math.floor(Date.now() / 1000);
-    const params = new URLSearchParams({
-      ks: session.currentKS,
-      format: '1',
-      'filter[objectType]': 'KalturaAnalyticsFilter',
-      'filter[entryIdIn]': session.entryId,
-      'filter[fromTime]': String(now - 120),
-      'filter[toTime]': String(now),
-      'filter[metrics]': 'count_viewers',
-      'filter[dimensions]': 'entry_id',
-    });
-    const { data } = await axios.post(url, params.toString(), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
-    console.log('[Viewers] analytics/query raw response:', JSON.stringify(data));
+  // Fallback: report/getTotal with live report types
+  for (const reportType of ['24', '10015']) {
+    try {
+      const url = `${session.serviceUrl}/api_v3/service/report/action/getTotal`;
+      const now = Math.floor(Date.now() / 1000);
+      const params = new URLSearchParams({
+        ks: session.currentKS,
+        format: '1',
+        reportType,
+        'reportInputFilter[objectType]': 'KalturaReportInputFilter',
+        'reportInputFilter[entryIdIn]': session.entryId,
+        'reportInputFilter[fromDate]': String(now - 300),
+        'reportInputFilter[toDate]': String(now),
+      });
+      const { data } = await axios.post(url, params.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+      console.log(`[Viewers] report/getTotal (type=${reportType}) raw response:`, JSON.stringify(data));
 
-    if (isKSError(data)) {
-      const retry = await handleKSError(session, data.code, () => fetchViewers(session));
-      if (retry !== null) return retry;
-      return 0;
-    }
+      if (isKSError(data)) {
+        const retry = await handleKSError(session, data.code, () => fetchViewers(session));
+        if (retry !== null) return retry;
+        return 0;
+      }
 
-    if (data?.objects?.length > 0) {
-      const obj = data.objects[0];
-      return parseInt(obj.count_viewers || obj.viewers || 0, 10);
+      if (isServiceForbidden(data)) continue;
+
+      // Parse CSV-style response: header\ndata
+      if (data?.header && data?.data) {
+        const headers = data.header.split(',');
+        const values = data.data.split(',');
+        const viewerIdx = headers.findIndex(h =>
+          /viewer|audience|unique/i.test(h)
+        );
+        if (viewerIdx >= 0) {
+          const count = parseInt(values[viewerIdx], 10);
+          if (count > 0) return count;
+        }
+        // Try first numeric value as fallback
+        for (const v of values) {
+          const n = parseInt(v, 10);
+          if (n > 0) return n;
+        }
+      }
+    } catch (err) {
+      console.log(`[Viewers] report/getTotal (type=${reportType}) error:`, err.message);
     }
-  } catch (err) {
-    console.log('[Viewers] analytics/query error:', err.message);
   }
 
-  // Last resort: entry metadata — check if live and has plays
+  // Last resort: entry metadata plays count
   try {
     const url = `${session.serviceUrl}/api_v3/service/media/action/get`;
     const { data } = await axios.get(url, {
