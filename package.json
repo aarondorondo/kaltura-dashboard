@@ -1,0 +1,18 @@
+{
+  "name": "kaltura-dashboard",
+  "version": "1.0.0",
+  "description": "Kaltura Live Analytics Dashboard",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "express-rate-limit": "^7.1.0",
+    "helmet": "^7.1.0",
+    "axios": "^1.6.0"
+  }
+}

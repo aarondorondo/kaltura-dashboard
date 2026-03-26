@@ -1,0 +1,1836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kaltura Live Analytics</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --accent: #6c63ff;
+      --live: #22c55e;
+      --warning: #f59e0b;
+      --error: #ef4444;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --viewers: #6c63ff;
+      --reactions: #22c55e;
+      --chat: #f59e0b;
+      --questions: #ef4444;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* ── Animations ──────────────────────────────────────────── */
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.3); opacity: 0.6; }
+    }
+    @keyframes flash {
+      0% { background-color: rgba(108,99,255,0.2); }
+      100% { background-color: transparent; }
+    }
+
+    /* ── Setup View ──────────────────────────────────────────── */
+    #setup-view {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 2rem 1rem;
+      opacity: 1;
+      transition: opacity 0.3s;
+    }
+    #setup-view.hidden { display: none; opacity: 0; }
+
+    .setup-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      max-width: 560px;
+      width: 100%;
+      padding: 2rem;
+    }
+
+    .setup-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.25rem;
+    }
+    .setup-header svg { flex-shrink: 0; }
+    .setup-header h1 { font-size: 1.5rem; font-weight: 700; }
+    .setup-subtitle { color: var(--text-muted); margin-bottom: 1.5rem; font-size: 0.95rem; }
+
+    /* ── Accordion ────────────────────────────────────────────── */
+    .accordion-section { margin-bottom: 1rem; }
+    .accordion-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      cursor: pointer;
+      padding: 0.75rem 0;
+      user-select: none;
+    }
+    .accordion-badge {
+      width: 24px; height: 24px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .accordion-title { flex: 1; font-weight: 600; font-size: 1rem; }
+    .accordion-chevron {
+      transition: transform 0.3s ease;
+      flex-shrink: 0;
+    }
+    .accordion-section.open .accordion-chevron { transform: rotate(180deg); }
+    .accordion-content {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+    .accordion-section.open .accordion-content { max-height: 600px; }
+    .accordion-inner { padding: 0.5rem 0 1rem 0; }
+
+    /* ── Form Elements ───────────────────────────────────────── */
+    .form-group { margin-bottom: 1rem; }
+    .form-group label {
+      display: block;
+      font-weight: 600;
+      font-size: 0.9rem;
+      margin-bottom: 0.35rem;
+    }
+    .form-group input[type="text"],
+    .form-group input[type="number"],
+    .form-group input[type="password"],
+    .form-group input[type="datetime-local"] {
+      width: 100%;
+      padding: 0.6rem 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus { border-color: var(--accent); }
+    .form-group input.input-error { border-color: var(--error); }
+    .help-text { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem; }
+    .error-text { font-size: 0.8rem; color: var(--error); margin-top: 0.25rem; display: none; }
+    .error-text.visible { display: block; }
+
+    .password-wrapper {
+      position: relative;
+    }
+    .password-wrapper input { padding-right: 2.5rem; }
+    .password-toggle {
+      position: absolute;
+      right: 0.5rem;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 0.25rem;
+      display: flex;
+      align-items: center;
+    }
+    .password-toggle:hover { color: var(--text); }
+
+    /* ── Pill Toggle ─────────────────────────────────────────── */
+    .pill-toggle {
+      display: flex;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .pill-toggle button {
+      flex: 1;
+      padding: 0.5rem 1rem;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .pill-toggle button.active {
+      background: var(--accent);
+      color: #fff;
+      border-radius: 6px;
+    }
+
+    /* ── Auth Panels ─────────────────────────────────────────── */
+    .auth-panel { transition: opacity 0.2s; }
+    .auth-panel.hidden { display: none; opacity: 0; }
+
+    .ks-warning {
+      background: rgba(245,158,11,0.1);
+      border: 1px solid rgba(245,158,11,0.3);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      color: var(--warning);
+      margin-top: 0.75rem;
+    }
+
+    /* ── Checkbox ─────────────────────────────────────────────── */
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 0.75rem 0;
+    }
+    .checkbox-row input[type="checkbox"] {
+      accent-color: var(--accent);
+      width: 16px;
+      height: 16px;
+    }
+    .checkbox-row label { font-size: 0.9rem; cursor: pointer; }
+
+    /* ── Info Note ────────────────────────────────────────────── */
+    .info-note {
+      font-size: 0.85rem;
+      color: var(--accent);
+      padding: 0.5rem 0;
+    }
+    .info-note.hidden { display: none; }
+
+    /* ── Metric Cards Grid (Setup) ───────────────────────────── */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+    }
+    .metric-select-card {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: 10px;
+      padding: 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+    }
+    .metric-select-card:hover { border-color: #3d4255; }
+    .metric-select-card.selected {
+      border: 2px solid var(--accent);
+      background: rgba(108,99,255,0.08);
+    }
+    .metric-select-card input { display: none; }
+    .metric-select-card .metric-icon { font-size: 2rem; margin-bottom: 0.25rem; }
+    .metric-select-card .metric-name { font-weight: 600; font-size: 1rem; }
+    .metric-select-card .metric-desc { color: var(--text-muted); font-size: 0.85rem; }
+
+    .metrics-validation { color: var(--error); font-size: 0.85rem; margin-top: 0.5rem; display: none; }
+
+    /* ── Submit ───────────────────────────────────────────────── */
+    .submit-btn {
+      width: 100%;
+      padding: 0.75rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: opacity 0.2s;
+      margin-top: 1.5rem;
+    }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .submit-btn .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      display: none;
+    }
+    .submit-btn.loading .spinner { display: block; }
+    .submit-btn.loading .btn-text { display: none; }
+    .submit-btn.loading .btn-loading-text { display: inline; }
+    .btn-loading-text { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .security-note {
+      text-align: center;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 0.75rem;
+    }
+
+    .error-banner {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      color: var(--error);
+      font-size: 0.9rem;
+      margin-top: 1rem;
+      display: none;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+    .error-banner.visible { display: flex; }
+    .error-banner-msg { flex: 1; }
+    .error-banner-close {
+      background: none; border: none; color: var(--error); cursor: pointer;
+      font-size: 1.1rem; padding: 0; line-height: 1;
+    }
+
+    /* ── Troubleshooting ─────────────────────────────────────── */
+    .troubleshooting {
+      margin-top: 1.5rem;
+      border-top: 1px solid var(--border);
+      padding-top: 1rem;
+    }
+    .troubleshooting-toggle {
+      background: none; border: none; color: var(--text-muted); cursor: pointer;
+      font-size: 0.85rem; padding: 0;
+    }
+    .troubleshooting-toggle:hover { color: var(--text); }
+    .troubleshooting-content {
+      max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
+    }
+    .troubleshooting.open .troubleshooting-content { max-height: 400px; }
+    .troubleshooting-content ul {
+      list-style: disc;
+      padding-left: 1.25rem;
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .troubleshooting-content li { margin-bottom: 0.4rem; }
+
+    /* ── Dashboard View ──────────────────────────────────────── */
+    #dashboard-view { display: none; opacity: 0; transition: opacity 0.3s; }
+    #dashboard-view.visible { display: block; opacity: 1; }
+
+    .top-bar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .top-bar-left { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; }
+    .top-bar-center { text-align: center; flex: 1; }
+    .top-bar-right { display: flex; align-items: center; gap: 0.75rem; }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .status-badge.live { background: rgba(34,197,94,0.15); color: var(--live); }
+    .status-badge.waiting { background: rgba(245,158,11,0.15); color: var(--warning); }
+    .status-badge.complete { background: rgba(148,163,184,0.15); color: var(--text-muted); }
+    .status-badge.error { background: rgba(239,68,68,0.15); color: var(--error); }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+    }
+    .status-badge.live .status-dot { background: var(--live); animation: pulse 1.5s infinite; }
+    .status-badge.waiting .status-dot { background: var(--warning); animation: pulse 1.5s infinite; }
+    .status-badge.complete .status-dot { background: var(--text-muted); }
+    .status-badge.error .status-dot { background: var(--error); }
+    .stream-info { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.2rem; }
+
+    .btn-secondary {
+      padding: 0.4rem 0.9rem;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.85rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      white-space: nowrap;
+    }
+    .btn-secondary:hover { border-color: var(--text-muted); }
+    .btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .disconnect-confirm { display: none; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+    .disconnect-confirm.visible { display: flex; }
+    .disconnect-confirm button {
+      padding: 0.3rem 0.6rem;
+      border-radius: 4px;
+      border: none;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    .btn-confirm-yes { background: var(--error); color: #fff; }
+    .btn-confirm-cancel { background: var(--border); color: var(--text); }
+
+    /* ── Warning/Error Banners (Dashboard) ────────────────────── */
+    .dashboard-banners { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
+    .warning-banner {
+      background: rgba(245,158,11,0.1);
+      border: 1px solid rgba(245,158,11,0.3);
+      border-radius: 8px;
+      padding: 0.6rem 1rem;
+      color: var(--warning);
+      font-size: 0.85rem;
+      margin-top: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .warning-banner-msg { flex: 1; }
+    .warning-banner-close {
+      background: none; border: none; color: var(--warning); cursor: pointer;
+      font-size: 1rem; padding: 0;
+    }
+    .error-banner-dash {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 8px;
+      padding: 0.6rem 1rem;
+      color: var(--error);
+      font-size: 0.85rem;
+      margin-top: 0.75rem;
+    }
+
+    /* ── Progress Bar ────────────────────────────────────────── */
+    .progress-section {
+      max-width: 1200px;
+      margin: 1rem auto 0;
+      padding: 0 1.5rem;
+      display: none;
+    }
+    .progress-section.visible { display: block; }
+    .progress-track {
+      width: 100%;
+      height: 8px;
+      background: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 4px;
+      transition: width 1s linear;
+      width: 0%;
+    }
+    .progress-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 0.3rem;
+    }
+    .progress-center { text-align: center; flex: 1; }
+
+    /* ── Dashboard Content ───────────────────────────────────── */
+    .dashboard-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1rem 1.5rem 5rem;
+    }
+
+    /* ── Metric Cards (Dashboard) ────────────────────────────── */
+    .metric-cards {
+      display: grid;
+      gap: 1rem;
+      margin-top: 0.5rem;
+    }
+    .metric-cards[data-count="4"] { grid-template-columns: repeat(4, 1fr); }
+    .metric-cards[data-count="3"] { grid-template-columns: repeat(3, 1fr); }
+    .metric-cards[data-count="2"] { grid-template-columns: repeat(2, 1fr); }
+    .metric-cards[data-count="1"] { grid-template-columns: 1fr; max-width: 320px; margin-left: auto; margin-right: auto; }
+
+    .metric-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      border-left: 3px solid var(--accent);
+      position: relative;
+    }
+    .metric-card.flash { animation: flash 600ms ease; }
+    .metric-card[data-metric="viewers"] { border-left-color: var(--viewers); }
+    .metric-card[data-metric="reactions"] { border-left-color: var(--reactions); }
+    .metric-card[data-metric="chat"] { border-left-color: var(--chat); }
+    .metric-card[data-metric="questions"] { border-left-color: var(--questions); }
+
+    .metric-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .metric-card-label {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .metric-card-icon { font-size: 1.5rem; }
+    .trend-badge {
+      padding: 0.15rem 0.5rem;
+      border-radius: 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .trend-badge.up { background: rgba(34,197,94,0.2); color: var(--live); }
+    .trend-badge.down { background: rgba(239,68,68,0.2); color: var(--error); }
+    .trend-badge.flat { background: rgba(148,163,184,0.15); color: var(--text-muted); }
+
+    .metric-card-value {
+      font-size: 3rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+      margin: 0.25rem 0;
+    }
+    .metric-card-sub { font-size: 0.8rem; color: var(--text-muted); }
+
+    /* ── Chart ────────────────────────────────────────────────── */
+    .chart-container {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-top: 1.5rem;
+    }
+    .chart-container h3 { font-size: 1.1rem; margin-bottom: 1rem; }
+    .chart-canvas-wrap { position: relative; height: 280px; }
+    .chart-canvas-wrap canvas { width: 100% !important; }
+    .chart-placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 280px;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    /* ── Data Table ───────────────────────────────────────────── */
+    .table-container {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-top: 1.5rem;
+    }
+    .table-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .table-header h3 { font-size: 1.1rem; }
+    .row-count-badge {
+      background: var(--accent);
+      color: #fff;
+      padding: 0.1rem 0.6rem;
+      border-radius: 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .table-scroll { max-height: 320px; overflow-y: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th {
+      background: var(--bg);
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      padding: 0.6rem 0.75rem;
+      text-align: left;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    td {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+    tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+    tr.latest-row td { border-left: 3px solid var(--accent); }
+    .table-empty {
+      text-align: center;
+      padding: 2rem;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    /* ── Status Bar ───────────────────────────────────────────── */
+    .status-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 0.5rem 1.5rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      z-index: 100;
+    }
+
+    /* ── CSV Modal ────────────────────────────────────────────── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 200;
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      max-width: 480px;
+      width: 90%;
+      padding: 1.5rem;
+    }
+    .modal-card h3 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+    .modal-summary { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem; }
+    .modal-checkboxes { margin-bottom: 1rem; }
+    .modal-checkboxes label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      margin-bottom: 0.4rem;
+      cursor: pointer;
+    }
+    .modal-checkboxes input[type="checkbox"] { accent-color: var(--accent); }
+    .csv-preview {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.8rem;
+      max-height: 120px;
+      overflow: auto;
+      white-space: pre;
+      margin-bottom: 1rem;
+      color: var(--text-muted);
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+    }
+    .btn-ghost {
+      padding: 0.5rem 1rem;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .btn-accent {
+      padding: 0.5rem 1rem;
+      background: var(--accent);
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    /* ── Responsive ───────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .metric-cards[data-count="4"] { grid-template-columns: repeat(2, 1fr); }
+      .metric-cards[data-count="3"] { grid-template-columns: 1fr; }
+      .top-bar { flex-wrap: wrap; }
+      .top-bar-center { order: 3; flex-basis: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- SETUP VIEW                                                              -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div id="setup-view">
+  <div class="setup-card">
+    <div class="setup-header">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#6c63ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/>
+        <path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.4"/>
+        <circle cx="12" cy="12" r="2"/>
+        <path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.4"/>
+        <path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/>
+      </svg>
+      <h1>Kaltura Live Analytics</h1>
+    </div>
+    <p class="setup-subtitle">Configure your stream and choose what to monitor</p>
+
+    <!-- SECTION 1: Authentication -->
+    <div class="accordion-section open" data-section="1">
+      <div class="accordion-header" onclick="toggleAccordion(this)">
+        <span class="accordion-badge">1</span>
+        <span class="accordion-title">Authentication</span>
+        <svg class="accordion-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="accordion-content">
+        <div class="accordion-inner">
+          <div class="pill-toggle" id="auth-toggle">
+            <button class="active" onclick="setAuthMode('credentials')">Credentials</button>
+            <button onclick="setAuthMode('ks')">KS Token</button>
+          </div>
+
+          <!-- Credentials Panel -->
+          <div class="auth-panel" id="credentials-panel">
+            <div class="form-group" style="margin-top:1rem">
+              <label for="serviceUrl">Kaltura Service URL</label>
+              <input type="text" id="serviceUrl" value="https://www.kaltura.com">
+              <div class="help-text">Your Kaltura server. Use the default for SaaS accounts.</div>
+            </div>
+            <div class="form-group">
+              <label for="partnerId">Partner ID</label>
+              <input type="number" id="partnerId" placeholder="e.g. 1234567">
+              <div class="help-text">KMC &rarr; Settings &rarr; Integration Settings</div>
+            </div>
+            <div class="form-group">
+              <label for="adminSecret">Admin Secret</label>
+              <div class="password-wrapper">
+                <input type="password" id="adminSecret">
+                <button type="button" class="password-toggle" onclick="togglePassword('adminSecret', this)">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
+              <div class="help-text">Used only on the local server to generate a session token. Never sent to your browser or stored anywhere.</div>
+            </div>
+          </div>
+
+          <!-- KS Token Panel -->
+          <div class="auth-panel hidden" id="ks-panel">
+            <div class="form-group" style="margin-top:1rem">
+              <label for="serviceUrlKs">Kaltura Service URL</label>
+              <input type="text" id="serviceUrlKs" value="https://www.kaltura.com">
+              <div class="help-text">Your Kaltura server. Use the default for SaaS accounts.</div>
+            </div>
+            <div class="form-group">
+              <label for="ksToken">Session Token (KS)</label>
+              <div class="password-wrapper">
+                <input type="password" id="ksToken" placeholder="djJ8MTIzNDU2N3...">
+                <button type="button" class="password-toggle" onclick="togglePassword('ksToken', this)">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
+              <div class="help-text">Paste a valid admin KS. Must have analytics read privileges.</div>
+            </div>
+            <div class="ks-warning">&#9888; KS tokens typically expire after 24 hours. For sessions longer than that, use Credentials mode so the server can refresh automatically.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 2: Stream -->
+    <div class="accordion-section open" data-section="2">
+      <div class="accordion-header" onclick="toggleAccordion(this)">
+        <span class="accordion-badge">2</span>
+        <span class="accordion-title">Stream</span>
+        <svg class="accordion-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="accordion-content">
+        <div class="accordion-inner">
+          <div class="form-group">
+            <label for="entryId">Entry ID</label>
+            <input type="text" id="entryId" placeholder="e.g. 1_abc12345">
+            <div class="help-text">Found in KMC &rarr; Content &rarr; click your live entry.</div>
+            <div class="error-text" id="entryId-error">Entry ID must start with 1_ followed by alphanumeric characters.</div>
+          </div>
+          <div class="form-group">
+            <label for="streamLabel">Stream Label (optional)</label>
+            <input type="text" id="streamLabel" placeholder="e.g. Company All-Hands Q1">
+            <div class="help-text">A friendly name for the dashboard. If blank, uses the entry name.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 3: Monitoring Window -->
+    <div class="accordion-section open" data-section="3">
+      <div class="accordion-header" onclick="toggleAccordion(this)">
+        <span class="accordion-badge">3</span>
+        <span class="accordion-title">Monitoring Window</span>
+        <svg class="accordion-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="accordion-content">
+        <div class="accordion-inner">
+          <div class="form-group">
+            <label for="startTime">Start Time</label>
+            <input type="datetime-local" id="startTime">
+            <div class="help-text">Polling starts immediately if this time has already passed.</div>
+          </div>
+          <div class="form-group">
+            <label for="endTime">End Time</label>
+            <input type="datetime-local" id="endTime">
+            <div class="help-text">Polling stops automatically at this time.</div>
+          </div>
+          <div class="checkbox-row">
+            <input type="checkbox" id="indefinite" onchange="toggleIndefinite()">
+            <label for="indefinite">Monitor indefinitely</label>
+          </div>
+          <div class="error-text" id="time-error" style="margin-bottom:0.5rem">End time must be after start time.</div>
+          <div class="info-note hidden" id="time-info-past">&#8505; Start time is in the past — polling will begin immediately.</div>
+          <div class="info-note hidden" id="time-info-future">&#8505; Polling will begin automatically at <span id="future-start-label"></span>.</div>
+
+          <div class="form-group" style="margin-top:1rem">
+            <label>Data Collection Interval</label>
+            <div class="pill-toggle" id="interval-toggle">
+              <button onclick="setInterval_(60000,'1 min',this)">1 min</button>
+              <button onclick="setInterval_(180000,'3 min',this)">3 min</button>
+              <button class="active" onclick="setInterval_(300000,'5 min',this)">5 min</button>
+              <button onclick="setInterval_(600000,'10 min',this)">10 min</button>
+              <button onclick="setInterval_(900000,'15 min',this)">15 min</button>
+              <button onclick="setInterval_(1800000,'30 min',this)">30 min</button>
+            </div>
+            <div class="help-text">How often to fetch a new snapshot.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 4: Metrics to Monitor -->
+    <div class="accordion-section open" data-section="4">
+      <div class="accordion-header" onclick="toggleAccordion(this)">
+        <span class="accordion-badge">4</span>
+        <span class="accordion-title">Metrics to Monitor</span>
+        <svg class="accordion-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="accordion-content">
+        <div class="accordion-inner">
+          <p style="color:var(--text-muted);font-size:0.9rem;margin-bottom:0.5rem">Select the metrics to display on your dashboard.</p>
+          <div class="metrics-grid">
+            <label class="metric-select-card selected" onclick="toggleMetric(this)">
+              <input type="checkbox" name="metric" value="viewers" checked>
+              <div class="metric-icon">&#128065;</div>
+              <div class="metric-name">Concurrent Viewers</div>
+              <div class="metric-desc">Live viewer count at this moment</div>
+            </label>
+            <label class="metric-select-card selected" onclick="toggleMetric(this)">
+              <input type="checkbox" name="metric" value="reactions" checked>
+              <div class="metric-icon">&#10084;&#65039;</div>
+              <div class="metric-name">Reactions</div>
+              <div class="metric-desc">Emoji and thumbs-up reactions per window</div>
+            </label>
+            <label class="metric-select-card selected" onclick="toggleMetric(this)">
+              <input type="checkbox" name="metric" value="chat" checked>
+              <div class="metric-icon">&#128172;</div>
+              <div class="metric-name">Chat Messages</div>
+              <div class="metric-desc">Chat messages sent in the polling window</div>
+            </label>
+            <label class="metric-select-card selected" onclick="toggleMetric(this)">
+              <input type="checkbox" name="metric" value="questions" checked>
+              <div class="metric-icon">&#10067;</div>
+              <div class="metric-name">Questions Asked</div>
+              <div class="metric-desc">Questions raised in the polling window</div>
+            </label>
+          </div>
+          <div class="metrics-validation" id="metrics-validation">Select at least one metric to monitor.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Submit -->
+    <button class="submit-btn" id="submit-btn" onclick="connectStream()">
+      <span class="spinner"></span>
+      <span class="btn-text">Connect Stream</span>
+      <span class="btn-loading-text">Verifying stream...</span>
+    </button>
+
+    <div class="error-banner" id="submit-error">
+      <span class="error-banner-msg" id="submit-error-msg"></span>
+      <button class="error-banner-close" onclick="this.parentElement.classList.remove('visible')">&times;</button>
+    </div>
+
+    <p class="security-note">&#128274; Your credentials are sent only to this local server, which uses them to communicate with Kaltura. They are never stored or forwarded elsewhere.</p>
+
+    <!-- Troubleshooting -->
+    <div class="troubleshooting" id="troubleshooting">
+      <button class="troubleshooting-toggle" onclick="this.parentElement.classList.toggle('open')">
+        Having trouble connecting? &#9662;
+      </button>
+      <div class="troubleshooting-content">
+        <ul>
+          <li>Entry ID must start with <code>1_</code> and exist in your Kaltura account</li>
+          <li>For private/on-prem Kaltura: the local proxy handles CORS, but your Kaltura server must be reachable from this machine</li>
+          <li>Viewers showing 0: stream may not be actively broadcasting yet</li>
+          <li>Reactions / Chat / Questions showing 0: these features may not be enabled on your Kaltura account — this is normal</li>
+          <li>KS token expired: switch to Credentials mode for automatic renewal</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- DASHBOARD VIEW                                                          -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div id="dashboard-view">
+  <!-- Top Bar -->
+  <div class="top-bar">
+    <div class="top-bar-left">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6c63ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.4"/>
+        <circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.4"/>
+        <path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/>
+      </svg>
+      <span>Kaltura Live Analytics</span>
+    </div>
+    <div class="top-bar-center">
+      <div id="dash-status-badge" class="status-badge live">
+        <span class="status-dot"></span>
+        <span id="dash-status-text">LIVE</span>
+      </div>
+      <div class="stream-info" id="dash-stream-info"></div>
+    </div>
+    <div class="top-bar-right">
+      <button class="btn-secondary" id="export-btn" onclick="openExportModal()" title="Export CSV">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export CSV
+      </button>
+      <button class="btn-secondary" id="disconnect-btn" onclick="showDisconnectConfirm()">Disconnect</button>
+      <div class="disconnect-confirm" id="disconnect-confirm">
+        Stop monitoring?
+        <button class="btn-confirm-yes" onclick="confirmDisconnect()">Yes, stop</button>
+        <button class="btn-confirm-cancel" onclick="cancelDisconnect()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Warning / Error Banners -->
+  <div class="dashboard-banners" id="dash-banners"></div>
+
+  <!-- Progress Bar -->
+  <div class="progress-section" id="progress-section">
+    <div class="progress-track">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+    <div class="progress-labels">
+      <span id="progress-start"></span>
+      <span class="progress-center" id="progress-center"></span>
+      <span id="progress-end"></span>
+    </div>
+  </div>
+
+  <!-- Dashboard Content -->
+  <div class="dashboard-content">
+    <!-- Metric Cards -->
+    <div class="metric-cards" id="metric-cards"></div>
+
+    <!-- Chart -->
+    <div class="chart-container">
+      <h3>Metrics Over Time</h3>
+      <div class="chart-canvas-wrap">
+        <canvas id="metrics-chart"></canvas>
+        <div class="chart-placeholder" id="chart-placeholder">&#128202; Chart will appear after two polls have completed</div>
+      </div>
+    </div>
+
+    <!-- Data Table -->
+    <div class="table-container">
+      <div class="table-header">
+        <h3>Poll History</h3>
+        <span class="row-count-badge" id="row-count">0</span>
+      </div>
+      <div class="table-scroll" id="table-scroll">
+        <table id="history-table">
+          <thead id="table-head"></thead>
+          <tbody id="table-body">
+            <tr><td class="table-empty" colspan="99">Waiting for first poll...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <span id="status-bar-left"></span>
+    <span id="status-bar-right"></span>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- CSV EXPORT MODAL                                                        -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="csv-modal" onclick="if(event.target===this)closeExportModal()">
+  <div class="modal-card">
+    <h3>Export Analytics Data</h3>
+    <div class="modal-summary" id="csv-summary"></div>
+    <div class="modal-checkboxes" id="csv-checkboxes"></div>
+    <pre class="csv-preview" id="csv-preview"></pre>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeExportModal()">Cancel</button>
+      <button class="btn-accent" onclick="downloadCSV()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download CSV
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- JAVASCRIPT                                                              -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<script>
+  // ── App State ──────────────────────────────────────────────────────────
+  let appState = {
+    view: 'setup',
+    status: null,
+    sessionId: null,
+    chart: null,
+    chartInitialized: false,
+    pollTimer: null,
+    countdownTimer: null,
+    progressTimer: null,
+    formValues: {},
+  };
+
+  let currentAuthMode = 'credentials';
+  let currentPollIntervalMs = 300000;
+  let currentPollIntervalLabel = '5 min';
+
+  // ── Init ───────────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', async () => {
+    initTimeDefaults();
+    // Check for existing active session via sessionStorage
+    const savedSid = sessionStorage.getItem('kaltura_sid');
+    if (savedSid) {
+      try {
+        const res = await fetch(`/api/status?sid=${savedSid}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.active || (data.status && data.status !== 'idle')) {
+            appState.sessionId = savedSid;
+            appState.status = data;
+            showDashboard();
+            return;
+          }
+        }
+        // Session gone or idle — clear storage
+        sessionStorage.removeItem('kaltura_sid');
+      } catch (e) { /* ignore */ }
+    }
+  });
+
+  function initTimeDefaults() {
+    const now = new Date();
+    const later = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+    document.getElementById('startTime').value = toLocalISO(now);
+    document.getElementById('endTime').value = toLocalISO(later);
+    updateTimeInfo();
+  }
+
+  function toLocalISO(d) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  // ── Accordion ──────────────────────────────────────────────────────────
+  function toggleAccordion(header) {
+    header.parentElement.classList.toggle('open');
+  }
+
+  // ── Auth Mode ──────────────────────────────────────────────────────────
+  function setAuthMode(mode) {
+    currentAuthMode = mode;
+    const btns = document.querySelectorAll('#auth-toggle button');
+    btns[0].classList.toggle('active', mode === 'credentials');
+    btns[1].classList.toggle('active', mode === 'ks');
+    document.getElementById('credentials-panel').classList.toggle('hidden', mode !== 'credentials');
+    document.getElementById('ks-panel').classList.toggle('hidden', mode !== 'ks');
+  }
+
+  // ── Password Toggle ───────────────────────────────────────────────────
+  function togglePassword(id, btn) {
+    const input = document.getElementById(id);
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.innerHTML = show
+      ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
+      : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  }
+
+  // ── Poll Interval ─────────────────────────────────────────────────────
+  function setInterval_(ms, label, btn) {
+    currentPollIntervalMs = ms;
+    currentPollIntervalLabel = label;
+    document.querySelectorAll('#interval-toggle button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+
+  // ── Indefinite Toggle ─────────────────────────────────────────────────
+  function toggleIndefinite() {
+    const checked = document.getElementById('indefinite').checked;
+    const endInput = document.getElementById('endTime');
+    endInput.disabled = checked;
+    endInput.style.opacity = checked ? '0.4' : '1';
+    validateForm();
+  }
+
+  // ── Time Info ─────────────────────────────────────────────────────────
+  function updateTimeInfo() {
+    const startVal = document.getElementById('startTime').value;
+    const pastNote = document.getElementById('time-info-past');
+    const futureNote = document.getElementById('time-info-future');
+
+    if (!startVal) {
+      pastNote.classList.add('hidden');
+      futureNote.classList.add('hidden');
+      return;
+    }
+
+    const startDate = new Date(startVal);
+    const now = new Date();
+    if (startDate <= now) {
+      pastNote.classList.remove('hidden');
+      futureNote.classList.add('hidden');
+    } else {
+      pastNote.classList.add('hidden');
+      futureNote.classList.remove('hidden');
+      document.getElementById('future-start-label').textContent = startDate.toLocaleString();
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('startTime').addEventListener('input', () => { updateTimeInfo(); validateForm(); });
+    document.getElementById('endTime').addEventListener('input', validateForm);
+    document.getElementById('entryId').addEventListener('blur', validateEntryId);
+  });
+
+  // ── Metric Toggle ─────────────────────────────────────────────────────
+  function toggleMetric(card) {
+    const cb = card.querySelector('input');
+    // The click on the label already toggles the checkbox
+    setTimeout(() => {
+      card.classList.toggle('selected', cb.checked);
+      validateForm();
+    }, 0);
+  }
+
+  // ── Validation ────────────────────────────────────────────────────────
+  function validateEntryId() {
+    const val = document.getElementById('entryId').value.trim();
+    const err = document.getElementById('entryId-error');
+    const input = document.getElementById('entryId');
+    if (val && !/^1_[a-zA-Z0-9]+$/.test(val)) {
+      err.classList.add('visible');
+      input.classList.add('input-error');
+      return false;
+    }
+    err.classList.remove('visible');
+    input.classList.remove('input-error');
+    return true;
+  }
+
+  function validateForm() {
+    const btn = document.getElementById('submit-btn');
+    const timeErr = document.getElementById('time-error');
+    const metricsVal = document.getElementById('metrics-validation');
+    let valid = true;
+
+    // Metrics
+    const checked = document.querySelectorAll('.metric-select-card input:checked');
+    if (checked.length === 0) {
+      metricsVal.style.display = 'block';
+      valid = false;
+    } else {
+      metricsVal.style.display = 'none';
+    }
+
+    // Time
+    const indefinite = document.getElementById('indefinite').checked;
+    if (!indefinite) {
+      const s = new Date(document.getElementById('startTime').value);
+      const e = new Date(document.getElementById('endTime').value);
+      if (document.getElementById('endTime').value && e <= s) {
+        timeErr.classList.add('visible');
+        valid = false;
+      } else {
+        timeErr.classList.remove('visible');
+      }
+    } else {
+      timeErr.classList.remove('visible');
+    }
+
+    // Start time not more than 30 days in past
+    const startVal = document.getElementById('startTime').value;
+    if (startVal) {
+      const s = new Date(startVal);
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      if (s < thirtyDaysAgo) {
+        timeErr.textContent = 'Start time cannot be more than 30 days in the past.';
+        timeErr.classList.add('visible');
+        valid = false;
+      } else if (!timeErr.classList.contains('visible')) {
+        timeErr.textContent = 'End time must be after start time.';
+      }
+    }
+
+    btn.disabled = !valid;
+    return valid;
+  }
+
+  // ── Connect Stream ────────────────────────────────────────────────────
+  async function connectStream() {
+    if (!validateEntryId()) return;
+    if (!validateForm()) return;
+
+    const btn = document.getElementById('submit-btn');
+    btn.classList.add('loading');
+    btn.disabled = true;
+    document.getElementById('submit-error').classList.remove('visible');
+
+    const indefinite = document.getElementById('indefinite').checked;
+    const serviceUrl = currentAuthMode === 'credentials'
+      ? document.getElementById('serviceUrl').value.trim()
+      : document.getElementById('serviceUrlKs').value.trim();
+
+    const body = {
+      authMode: currentAuthMode,
+      serviceUrl,
+      entryId: document.getElementById('entryId').value.trim(),
+      streamLabel: document.getElementById('streamLabel').value.trim() || null,
+      pollIntervalMs: currentPollIntervalMs,
+      pollIntervalLabel: currentPollIntervalLabel,
+      startTime: new Date(document.getElementById('startTime').value).toISOString(),
+      endTime: indefinite ? null : new Date(document.getElementById('endTime').value).toISOString(),
+      selectedMetrics: {
+        viewers: document.querySelector('input[value="viewers"]').checked,
+        reactions: document.querySelector('input[value="reactions"]').checked,
+        chat: document.querySelector('input[value="chat"]').checked,
+        questions: document.querySelector('input[value="questions"]').checked,
+      },
+    };
+
+    if (currentAuthMode === 'credentials') {
+      body.partnerId = parseInt(document.getElementById('partnerId').value, 10);
+      body.adminSecret = document.getElementById('adminSecret').value;
+    } else {
+      body.ksToken = document.getElementById('ksToken').value;
+    }
+
+    // Save form values for repopulation after disconnect
+    appState.formValues = { ...body, authMode: currentAuthMode };
+
+    // Include existing sessionId so server can clean it up
+    if (appState.sessionId) body.sessionId = appState.sessionId;
+
+    try {
+      const res = await fetch('/api/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+
+      if (!data.success) {
+        document.getElementById('submit-error-msg').textContent = data.error || 'Connection failed.';
+        document.getElementById('submit-error').classList.add('visible');
+        // Highlight specific field
+        if (data.field) {
+          const fieldEl = document.getElementById(data.field);
+          if (fieldEl) { fieldEl.classList.add('input-error'); fieldEl.focus(); }
+        }
+        btn.classList.remove('loading');
+        btn.disabled = false;
+        return;
+      }
+
+      // Success — store session ID, fetch status, switch to dashboard
+      appState.sessionId = data.sessionId;
+      sessionStorage.setItem('kaltura_sid', data.sessionId);
+      const statusRes = await fetch(`/api/status?sid=${data.sessionId}`);
+      appState.status = await statusRes.json();
+      showDashboard();
+    } catch (err) {
+      document.getElementById('submit-error-msg').textContent = 'Network error. Is the server running?';
+      document.getElementById('submit-error').classList.add('visible');
+    }
+
+    btn.classList.remove('loading');
+    btn.disabled = false;
+  }
+
+  // ── Show Dashboard ────────────────────────────────────────────────────
+  function showDashboard() {
+    appState.view = 'dashboard';
+    document.getElementById('setup-view').classList.add('hidden');
+    const dash = document.getElementById('dashboard-view');
+    dash.style.display = 'block';
+    requestAnimationFrame(() => dash.classList.add('visible'));
+
+    renderDashboard();
+    startPolling();
+  }
+
+  function showSetup() {
+    appState.view = 'setup';
+    const dash = document.getElementById('dashboard-view');
+    dash.classList.remove('visible');
+    dash.style.display = 'none';
+    document.getElementById('setup-view').classList.remove('hidden');
+
+    stopTimers();
+    if (appState.chart) { appState.chart.destroy(); appState.chart = null; }
+    appState.chartInitialized = false;
+    appState.status = null;
+
+    // Repopulate form
+    repopulateForm();
+  }
+
+  function repopulateForm() {
+    const fv = appState.formValues;
+    if (!fv) return;
+    if (fv.authMode) setAuthMode(fv.authMode);
+    if (fv.serviceUrl) {
+      document.getElementById('serviceUrl').value = fv.serviceUrl;
+      document.getElementById('serviceUrlKs').value = fv.serviceUrl;
+    }
+    if (fv.partnerId) document.getElementById('partnerId').value = fv.partnerId;
+    if (fv.entryId) document.getElementById('entryId').value = fv.entryId;
+    if (fv.streamLabel) document.getElementById('streamLabel').value = fv.streamLabel;
+  }
+
+  // ── Polling ───────────────────────────────────────────────────────────
+  function startPolling() {
+    stopTimers();
+    appState.pollTimer = setInterval(fetchStatus, 15000);
+    appState.countdownTimer = setInterval(updateCountdowns, 1000);
+    appState.progressTimer = setInterval(updateProgress, 60000);
+  }
+
+  function stopTimers() {
+    clearInterval(appState.pollTimer);
+    clearInterval(appState.countdownTimer);
+    clearInterval(appState.progressTimer);
+  }
+
+  async function fetchStatus() {
+    if (!appState.sessionId) return;
+    try {
+      const res = await fetch(`/api/status?sid=${appState.sessionId}`);
+      if (!res.ok) return;
+      appState.status = await res.json();
+      renderDashboard();
+    } catch (e) { /* ignore */ }
+  }
+
+  // ── Render Dashboard ──────────────────────────────────────────────────
+  function renderDashboard() {
+    const s = appState.status;
+    if (!s) return;
+
+    updateStatusBadge(s);
+    updateStreamInfo(s);
+    updateBanners(s);
+    updateProgress();
+    updateMetricCards(s);
+    updateChart(s);
+    updateTable(s);
+    updateStatusBar(s);
+    updateExportBtn(s);
+  }
+
+  function updateStatusBadge(s) {
+    const badge = document.getElementById('dash-status-badge');
+    const text = document.getElementById('dash-status-text');
+    badge.className = 'status-badge ' + s.status;
+
+    if (s.status === 'live') text.textContent = 'LIVE';
+    else if (s.status === 'waiting') {
+      const start = new Date(s.startTime);
+      text.textContent = 'WAITING — starts at ' + start.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    }
+    else if (s.status === 'complete') text.textContent = 'COMPLETE';
+    else if (s.status === 'error') text.textContent = 'ERROR';
+    else text.textContent = s.status.toUpperCase();
+  }
+
+  function updateStreamInfo(s) {
+    const info = document.getElementById('dash-stream-info');
+    const label = s.streamLabel || s.entryName || '';
+    info.textContent = label + (s.entryId ? '  \u00b7  ' + s.entryId : '');
+  }
+
+  function updateBanners(s) {
+    const container = document.getElementById('dash-banners');
+    container.innerHTML = '';
+
+    // Warnings (dismissible)
+    (s.warnings || []).forEach(w => {
+      const div = document.createElement('div');
+      div.className = 'warning-banner';
+      div.innerHTML = `<span class="warning-banner-msg">${w}</span><button class="warning-banner-close" onclick="this.parentElement.remove()">&times;</button>`;
+      container.appendChild(div);
+    });
+
+    // Error (non-dismissible)
+    if (s.status === 'error' && s.lastError) {
+      const div = document.createElement('div');
+      div.className = 'error-banner-dash';
+      div.textContent = s.lastError;
+      container.appendChild(div);
+    }
+  }
+
+  // ── Progress Bar ──────────────────────────────────────────────────────
+  function updateProgress() {
+    const s = appState.status;
+    if (!s) return;
+
+    const section = document.getElementById('progress-section');
+    if (!s.startTime || !s.endTime || s.status === 'idle') {
+      section.classList.remove('visible');
+      return;
+    }
+    section.classList.add('visible');
+
+    const start = new Date(s.startTime).getTime();
+    const end = new Date(s.endTime).getTime();
+    const now = Date.now();
+    const elapsed = Math.max(0, Math.min(100, ((now - start) / (end - start)) * 100));
+    const remainMin = Math.max(0, Math.round((end - now) / 60000));
+
+    document.getElementById('progress-fill').style.width = elapsed + '%';
+    document.getElementById('progress-start').textContent = new Date(s.startTime).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    document.getElementById('progress-end').textContent = new Date(s.endTime).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+
+    if (s.status === 'complete') {
+      document.getElementById('progress-center').textContent = 'Monitoring window complete';
+      document.getElementById('progress-fill').style.width = '100%';
+    } else {
+      document.getElementById('progress-center').textContent =
+        `\u25b2 Now \u00b7 ${Math.round(elapsed)}% \u00b7 ${remainMin} min remaining`;
+    }
+  }
+
+  // ── Metric Cards ──────────────────────────────────────────────────────
+  const metricConfig = {
+    viewers:   { icon: '\ud83d\udc41', name: 'Concurrent Viewers', color: 'viewers', sub: 'Right Now' },
+    reactions: { icon: '\u2764\ufe0f', name: 'Reactions', color: 'reactions', sub: '' },
+    chat:      { icon: '\ud83d\udcac', name: 'Chat Messages', color: 'chat', sub: '' },
+    questions: { icon: '\u2753', name: 'Questions Asked', color: 'questions', sub: '' },
+  };
+
+  function updateMetricCards(s) {
+    const container = document.getElementById('metric-cards');
+    const selected = Object.keys(s.selectedMetrics).filter(k => s.selectedMetrics[k]);
+    container.setAttribute('data-count', selected.length);
+
+    // Build cards if not yet built or selection changed
+    if (container.dataset.built !== selected.join(',')) {
+      container.innerHTML = '';
+      selected.forEach(key => {
+        const cfg = metricConfig[key];
+        const subLabel = key === 'viewers' ? 'Right Now'
+          : `Last ${s.pollIntervalLabel || '5 min'}`;
+        const card = document.createElement('div');
+        card.className = 'metric-card';
+        card.dataset.metric = key;
+        card.id = `card-${key}`;
+        card.innerHTML = `
+          <div class="metric-card-top">
+            <div class="metric-card-label"><span class="metric-card-icon">${cfg.icon}</span>${cfg.name}</div>
+            <span class="trend-badge flat" id="trend-${key}">&mdash;</span>
+          </div>
+          <div class="metric-card-value" id="value-${key}">&mdash;</div>
+          <div class="metric-card-sub">${subLabel}</div>
+        `;
+        container.appendChild(card);
+      });
+      container.dataset.built = selected.join(',');
+    }
+
+    // Update values
+    selected.forEach(key => {
+      const valEl = document.getElementById(`value-${key}`);
+      const trendEl = document.getElementById(`trend-${key}`);
+      const cardEl = document.getElementById(`card-${key}`);
+      const val = s.latestMetrics?.[key];
+      const prev = s.previousMetrics?.[key];
+
+      if (val != null && val !== undefined) {
+        const newVal = String(val);
+        if (valEl.textContent !== newVal) {
+          valEl.textContent = newVal;
+          // Flash animation
+          cardEl.classList.remove('flash');
+          void cardEl.offsetWidth; // force reflow
+          cardEl.classList.add('flash');
+          setTimeout(() => cardEl.classList.remove('flash'), 600);
+        }
+      }
+
+      if (prev != null && val != null) {
+        const diff = val - prev;
+        if (diff > 0) {
+          trendEl.className = 'trend-badge up';
+          trendEl.textContent = `\u25b2 +${diff}`;
+        } else if (diff < 0) {
+          trendEl.className = 'trend-badge down';
+          trendEl.textContent = `\u25bc ${diff}`;
+        } else {
+          trendEl.className = 'trend-badge flat';
+          trendEl.textContent = '\u2014';
+        }
+      }
+    });
+  }
+
+  // ── Chart ─────────────────────────────────────────────────────────────
+  function updateChart(s) {
+    const placeholder = document.getElementById('chart-placeholder');
+    const canvas = document.getElementById('metrics-chart');
+    const selected = Object.keys(s.selectedMetrics).filter(k => s.selectedMetrics[k]);
+
+    if (s.history.length < 2) {
+      placeholder.style.display = 'flex';
+      canvas.style.display = 'none';
+      return;
+    }
+
+    placeholder.style.display = 'none';
+    canvas.style.display = 'block';
+
+    const colors = { viewers: '#6c63ff', reactions: '#22c55e', chat: '#f59e0b', questions: '#ef4444' };
+    const labels = s.history.map(h => {
+      const d = new Date(h.timestamp);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    });
+
+    if (!appState.chartInitialized) {
+      const datasets = selected.map(key => ({
+        label: metricConfig[key].name,
+        data: s.history.map(h => h[key] ?? 0),
+        borderColor: colors[key],
+        backgroundColor: colors[key],
+        tension: 0.4,
+        pointRadius: 4,
+        pointHoverRadius: 7,
+        fill: false,
+      }));
+
+      appState.chart = new Chart(canvas, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          scales: {
+            x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(42,45,58,0.8)' } },
+            y: { beginAtZero: true, ticks: { color: '#94a3b8', precision: 0 }, grid: { color: 'rgba(42,45,58,0.8)' } },
+          },
+          plugins: {
+            legend: { position: 'top', labels: { color: '#f1f5f9' } },
+            tooltip: {
+              backgroundColor: '#1a1d27',
+              titleColor: '#f1f5f9',
+              bodyColor: '#f1f5f9',
+              borderColor: '#2a2d3a',
+              borderWidth: 1,
+            },
+          },
+        },
+      });
+      appState.chartInitialized = true;
+    } else if (appState.chart) {
+      // Push new data points
+      const chart = appState.chart;
+      const currentLen = chart.data.labels.length;
+      if (s.history.length > currentLen) {
+        for (let i = currentLen; i < s.history.length; i++) {
+          const h = s.history[i];
+          const d = new Date(h.timestamp);
+          chart.data.labels.push(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+          selected.forEach((key, di) => {
+            if (chart.data.datasets[di]) {
+              chart.data.datasets[di].data.push(h[key] ?? 0);
+            }
+          });
+        }
+        chart.update('none');
+      }
+    }
+  }
+
+  // ── Data Table ────────────────────────────────────────────────────────
+  function updateTable(s) {
+    const selected = Object.keys(s.selectedMetrics).filter(k => s.selectedMetrics[k]);
+    const thead = document.getElementById('table-head');
+    const tbody = document.getElementById('table-body');
+    const rowCount = document.getElementById('row-count');
+
+    // Header
+    let headerHtml = '<tr><th>#</th><th>Timestamp</th>';
+    selected.forEach(key => {
+      const names = { viewers: 'Viewers', reactions: 'Reactions', chat: 'Chat Messages', questions: 'Questions' };
+      headerHtml += `<th>${names[key]}</th>`;
+    });
+    headerHtml += '<th>Interval</th></tr>';
+    thead.innerHTML = headerHtml;
+
+    // Rows
+    rowCount.textContent = s.history.length;
+    if (s.history.length === 0) {
+      tbody.innerHTML = '<tr><td class="table-empty" colspan="99">Waiting for first poll...</td></tr>';
+      return;
+    }
+
+    let html = '';
+    const reversed = [...s.history].reverse();
+    reversed.forEach((row, i) => {
+      const isLatest = i === 0;
+      const idx = s.history.length - i;
+      const ts = new Date(row.timestamp).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      html += `<tr class="${isLatest ? 'latest-row' : ''}"><td>${idx}</td><td>${ts}</td>`;
+      selected.forEach(key => {
+        const val = row[key];
+        html += `<td>${val != null ? val : '\u2014'}</td>`;
+      });
+      html += `<td>${s.pollIntervalLabel || ''}</td></tr>`;
+    });
+    tbody.innerHTML = html;
+  }
+
+  // ── Status Bar ────────────────────────────────────────────────────────
+  function updateStatusBar(s) {
+    const left = document.getElementById('status-bar-left');
+    const right = document.getElementById('status-bar-right');
+
+    if (s.status === 'live') {
+      const lastPoll = s.lastPoll ? new Date(s.lastPoll).toLocaleTimeString() : '...';
+      left.textContent = `Last updated: ${lastPoll}  \u00b7  Next poll in: ${getCountdown(s.nextPollAt)}`;
+    } else if (s.status === 'waiting') {
+      left.textContent = `Polling begins in: ${getCountdown(s.startTime)}`;
+    } else if (s.status === 'complete') {
+      left.textContent = `Monitoring complete \u00b7 ${s.dataPoints} snapshots collected`;
+    } else if (s.status === 'error') {
+      left.textContent = 'Polling stopped due to error';
+    }
+
+    const endLabel = s.endTime
+      ? new Date(s.endTime).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
+      : 'ongoing';
+    const startLabel = s.startTime
+      ? new Date(s.startTime).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
+      : '';
+    right.textContent = `${s.dataPoints} data points  \u00b7  Every ${s.pollIntervalLabel || ''}  \u00b7  ${startLabel} \u2192 ${endLabel}`;
+  }
+
+  function getCountdown(isoStr) {
+    if (!isoStr) return '--:--';
+    const diff = Math.max(0, new Date(isoStr).getTime() - Date.now());
+    const m = Math.floor(diff / 60000);
+    const sec = Math.floor((diff % 60000) / 1000);
+    return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  }
+
+  function updateCountdowns() {
+    const s = appState.status;
+    if (!s) return;
+    updateStatusBar(s);
+  }
+
+  // ── Export Button State ───────────────────────────────────────────────
+  function updateExportBtn(s) {
+    const btn = document.getElementById('export-btn');
+    const disabled = s.status === 'waiting' || s.status === 'error' || s.history.length === 0;
+    btn.disabled = disabled;
+    btn.title = disabled ? 'Export available once polling begins' : 'Export CSV';
+  }
+
+  // ── Disconnect ────────────────────────────────────────────────────────
+  function showDisconnectConfirm() {
+    document.getElementById('disconnect-btn').style.display = 'none';
+    document.getElementById('disconnect-confirm').classList.add('visible');
+  }
+
+  function cancelDisconnect() {
+    document.getElementById('disconnect-confirm').classList.remove('visible');
+    document.getElementById('disconnect-btn').style.display = '';
+  }
+
+  async function confirmDisconnect() {
+    try {
+      await fetch('/api/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: appState.sessionId }),
+      });
+    } catch (e) { /* ignore */ }
+    sessionStorage.removeItem('kaltura_sid');
+    appState.sessionId = null;
+    showSetup();
+  }
+
+  // ── CSV Export Modal ──────────────────────────────────────────────────
+  function openExportModal() {
+    const s = appState.status;
+    if (!s || s.history.length === 0) return;
+
+    const modal = document.getElementById('csv-modal');
+    const selected = Object.keys(s.selectedMetrics).filter(k => s.selectedMetrics[k]);
+
+    // Summary
+    const first = s.history[0]?.timestamp;
+    const last = s.history[s.history.length - 1]?.timestamp;
+    document.getElementById('csv-summary').textContent =
+      `${s.history.length} snapshots \u00b7 ${new Date(first).toLocaleString()} \u2192 ${new Date(last).toLocaleString()}`;
+
+    // Checkboxes
+    const colNames = { viewers: 'Concurrent Viewers', reactions: 'Reactions', chat: 'Chat Messages', questions: 'Questions Asked' };
+    let cbHtml = '<label><input type="checkbox" checked data-col="timestamp" onchange="updateCSVPreview()"> Timestamp</label>';
+    selected.forEach(k => {
+      cbHtml += `<label><input type="checkbox" checked data-col="${k}" onchange="updateCSVPreview()"> ${colNames[k]}</label>`;
+    });
+    cbHtml += '<label><input type="checkbox" data-col="entryId" onchange="updateCSVPreview()"> Entry ID</label>';
+    cbHtml += '<label><input type="checkbox" data-col="entryName" onchange="updateCSVPreview()"> Entry Name</label>';
+    cbHtml += '<label><input type="checkbox" data-col="pollInterval" onchange="updateCSVPreview()"> Poll Interval</label>';
+    cbHtml += '<label><input type="checkbox" data-col="headerComments" onchange="updateCSVPreview()"> Include monitoring window as header comments</label>';
+    document.getElementById('csv-checkboxes').innerHTML = cbHtml;
+
+    updateCSVPreview();
+    modal.classList.add('visible');
+  }
+
+  function closeExportModal() {
+    document.getElementById('csv-modal').classList.remove('visible');
+  }
+
+  function getCSVColumns() {
+    const checkboxes = document.querySelectorAll('#csv-checkboxes input[type="checkbox"]');
+    const cols = [];
+    let includeHeader = false;
+    checkboxes.forEach(cb => {
+      if (cb.checked) {
+        if (cb.dataset.col === 'headerComments') includeHeader = true;
+        else cols.push(cb.dataset.col);
+      }
+    });
+    return { cols, includeHeader };
+  }
+
+  function buildCSV() {
+    const s = appState.status;
+    if (!s) return '';
+    const { cols, includeHeader } = getCSVColumns();
+    const colLabels = {
+      timestamp: 'Timestamp', viewers: 'Concurrent Viewers', reactions: 'Reactions',
+      chat: 'Chat Messages', questions: 'Questions Asked', entryId: 'Entry ID',
+      entryName: 'Entry Name', pollInterval: 'Poll Interval'
+    };
+
+    let csv = '';
+    if (includeHeader) {
+      csv += `# Monitoring Start: ${s.startTime || ''}\n`;
+      csv += `# Monitoring End: ${s.endTime || 'ongoing'}\n`;
+      csv += `# Entry: ${s.entryId || ''} — ${s.entryName || ''}\n`;
+    }
+    csv += cols.map(c => colLabels[c] || c).join(',') + '\n';
+
+    s.history.forEach(row => {
+      csv += cols.map(c => {
+        if (c === 'timestamp') return row.timestamp;
+        if (c === 'entryId') return s.entryId || '';
+        if (c === 'entryName') return s.entryName || '';
+        if (c === 'pollInterval') return s.pollIntervalLabel || '';
+        return row[c] ?? '';
+      }).join(',') + '\n';
+    });
+    return csv;
+  }
+
+  function updateCSVPreview() {
+    const csv = buildCSV();
+    const lines = csv.split('\n');
+    // Show header comments + header row + first 3 data rows
+    let previewLines = [];
+    let dataCount = 0;
+    for (const line of lines) {
+      if (line.startsWith('#') || dataCount <= 3) {
+        previewLines.push(line);
+        if (!line.startsWith('#') && line.trim()) dataCount++;
+      } else break;
+    }
+    if (lines.length > previewLines.length) previewLines.push('...');
+    document.getElementById('csv-preview').textContent = previewLines.join('\n');
+  }
+
+  function downloadCSV() {
+    const s = appState.status;
+    const csv = buildCSV();
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const dateStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+    const filename = `kaltura-analytics-${s?.entryId || 'export'}-${dateStr}.csv`;
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    closeExportModal();
+  }
+</script>
+</body>
+</html>
