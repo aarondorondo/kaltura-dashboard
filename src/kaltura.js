@@ -137,69 +137,11 @@ export async function fetchViewers(session) {
 
   const now = Math.floor(Date.now() / 1000);
 
-  // Primary: HIGHLIGHTS_WEBCAST (40001) — use wider window (1 hour) for viewer data
-  // Also try with the full session duration for cumulative unique viewers
-  const windows = [
-    { from: now - 3600, to: now, label: '1h' },
-    { from: now - 86400, to: now, label: '24h' },
-  ];
-
-  for (const window of windows) {
-    for (const reportType of ['40001', '60001']) {
-      try {
-        const data = await fetchReportTotal(session, reportType, window.from, window.to);
-        console.log(`[Viewers] report/getTotal (type=${reportType}, window=${window.label}) raw:`, JSON.stringify(data));
-
-        if (isKSError(data)) {
-          const retry = await handleKSError(session, data.code, () => fetchViewers(session));
-          if (retry !== null) return retry;
-          return 0;
-        }
-        if (isServiceForbidden(data)) continue;
-
-        const fields = parseReportTotal(data);
-        console.log(`[Viewers] report fields (${window.label}):`, JSON.stringify(fields));
-
-        // Look for viewer count fields
-        for (const key of ['live_view_period_count', 'combined_live_view_period_count',
-                           'count_viewers', 'unique_viewers', 'unique_known_users',
-                           'count_loads', 'count_plays']) {
-          if (fields[key] && parseInt(fields[key], 10) > 0) {
-            return parseInt(fields[key], 10);
-          }
-        }
-
-        // If sum_live_view_period exists, estimate viewers from avg view time
-        // sum_live_view_period / avg_time ≈ viewer count
-        if (fields['sum_live_view_period'] && parseFloat(fields['sum_live_view_period']) > 0) {
-          const sumViewPeriod = parseFloat(fields['sum_live_view_period']);
-          const avgViewPeriod = parseFloat(fields['combined_live_avg_play_time'] || fields['avg_view_period'] || '0');
-          if (avgViewPeriod > 0) {
-            const estimated = Math.round(sumViewPeriod / avgViewPeriod);
-            console.log(`[Viewers] Estimated from sum/avg: ${sumViewPeriod}/${avgViewPeriod} = ${estimated}`);
-            if (estimated > 0) return estimated;
-          }
-        }
-      } catch (err) {
-        console.log(`[Viewers] report/getTotal (type=${reportType}, window=${window.label}) error:`, err.message);
-      }
-    }
-  }
-
-  // Fallback: liveReports/getEvents ENTRY_TOTAL
+  // Primary: LIVE_MEETING_USERS_OVERVIEW_REALTIME (10016)
+  // Returns view_unique_combined_live_audience — active users right now
   try {
-    const url = `${session.serviceUrl}/api_v3/service/liveReports/action/getEvents`;
-    const params = new URLSearchParams({
-      ks: session.currentKS,
-      reportType: 'ENTRY_TOTAL',
-      'filter[objectType]': 'KalturaLiveReportInputFilter',
-      'filter[entryIds]': session.entryId,
-      format: '1',
-    });
-    const { data } = await axios.post(url, params.toString(), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
-    console.log('[Viewers] liveReports/getEvents raw:', JSON.stringify(data));
+    const data = await fetchReportTotal(session, '10016', now - 86400, now);
+    console.log('[Viewers] report 10016 raw:', JSON.stringify(data));
 
     if (isKSError(data)) {
       const retry = await handleKSError(session, data.code, () => fetchViewers(session));
@@ -207,38 +149,85 @@ export async function fetchViewers(session) {
       return 0;
     }
 
-    if (!isServiceForbidden(data) && data?.objects?.length > 0) {
-      const obj = data.objects[0];
-      const count = obj.audience || obj.plays || 0;
-      if (count > 0) return count;
+    if (!isServiceForbidden(data)) {
+      const fields = parseReportTotal(data);
+      console.log('[Viewers] report 10016 fields:', JSON.stringify(fields));
+      const active = parseInt(fields['view_unique_combined_live_audience'] || '0', 10);
+      if (active > 0) return active;
     }
   } catch (err) {
-    console.log('[Viewers] liveReports/getEvents error:', err.message);
+    console.log('[Viewers] report 10016 error:', err.message);
+  }
+
+  // Fallback: EP_WEBCAST_ENGAGEMENT (60003) — unique_combined_live_viewers
+  try {
+    const data = await fetchReportTotal(session, '60003', now - 86400, now);
+    console.log('[Viewers] report 60003 raw:', JSON.stringify(data));
+
+    if (!isKSError(data) && !isServiceForbidden(data)) {
+      const fields = parseReportTotal(data);
+      const viewers = parseInt(fields['unique_combined_live_viewers'] || '0', 10);
+      if (viewers > 0) return viewers;
+    }
+  } catch (err) {
+    console.log('[Viewers] report 60003 error:', err.message);
+  }
+
+  // Last fallback: liveReports ENTRY_TIME_LINE — audience graph
+  try {
+    const url = `${session.serviceUrl}/api_v3/service/liveReports/action/getEvents`;
+    const params = new URLSearchParams({
+      ks: session.currentKS,
+      reportType: 'ENTRY_TIME_LINE',
+      'filter[objectType]': 'KalturaLiveReportInputFilter',
+      'filter[entryIds]': session.entryId,
+      format: '1',
+    });
+    const { data } = await axios.post(url, params.toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+    console.log('[Viewers] liveReports ENTRY_TIME_LINE raw:', JSON.stringify(data));
+
+    if (Array.isArray(data)) {
+      const audienceGraph = data.find(g => g.id === 'audience');
+      if (audienceGraph?.data) {
+        // Data is semicolon-separated timestamp|value pairs; take the latest
+        const points = audienceGraph.data.split(';').filter(Boolean);
+        if (points.length > 0) {
+          const lastPoint = points[points.length - 1];
+          const value = parseInt(lastPoint.split('|')[1] || '0', 10);
+          if (value > 0) return value;
+        }
+      }
+    }
+  } catch (err) {
+    console.log('[Viewers] liveReports ENTRY_TIME_LINE error:', err.message);
   }
 
   return 0;
 }
 
 // ── Engagement Metrics (CnC) ────────────────────────────────────────────────
-// Kaltura CnC stores chat/reactions/Q&A in the report service, not cuepoints.
-// We fetch ENGAGEMENT_TOOLS_WEBCAST (40012) or EP equivalent (60003) which
-// returns totals for all engagement tools in one call.
+// Kaltura CnC reports chat/reactions/Q&A via the report service.
+// EP_WEBCAST_LIVE_USER_ENGAGEMENT (60010) has all engagement fields:
+//   count_group_chat_messages_sent, count_reaction_clicked, count_q_and_a_threads
 
-let _lastEngagementData = null;
-let _lastEngagementFetchTime = 0;
+// Per-session cache to avoid redundant API calls within the same poll tick
+const _engagementCache = new Map();
 
 async function fetchEngagementReport(session, fromDate, toDate) {
-  // Cache for 30s to avoid redundant calls (chat/reactions/questions all need this)
-  const now = Date.now();
-  if (_lastEngagementData && (now - _lastEngagementFetchTime) < 30000) {
-    return _lastEngagementData;
+  const cacheKey = session.entryId;
+  const cached = _engagementCache.get(cacheKey);
+  if (cached && (Date.now() - cached.time) < 30000) {
+    return cached.fields;
   }
 
-  // Try webcast engagement tools report types
-  for (const reportType of ['40012', '60003', '40001', '60001']) {
+  // Primary: EP_WEBCAST_LIVE_USER_ENGAGEMENT (60010) — has all CnC fields
+  // Fallback: ENGAGEMENT_TOOLS_WEBCAST (40012) — has reactions but not chat
+  for (const reportType of ['60010', '60003', '40012']) {
     try {
       const data = await fetchReportTotal(session, reportType, fromDate, toDate);
-      console.log(`[Engagement] report/getTotal (type=${reportType}) raw:`, JSON.stringify(data));
+      console.log(`[Engagement] report ${reportType} raw:`, JSON.stringify(data));
 
       if (isKSError(data)) {
         await handleKSError(session, data.code, () => fetchEngagementReport(session, fromDate, toDate));
@@ -247,14 +236,15 @@ async function fetchEngagementReport(session, fromDate, toDate) {
       if (isServiceForbidden(data)) continue;
 
       const fields = parseReportTotal(data);
-      if (Object.keys(fields).length > 0) {
-        console.log(`[Engagement] report fields (type=${reportType}):`, JSON.stringify(fields));
-        _lastEngagementData = fields;
-        _lastEngagementFetchTime = now;
+      // Check if this report has meaningful engagement fields (not just empty headers)
+      const hasData = Object.values(fields).some(v => v && v !== '0');
+      if (hasData) {
+        console.log(`[Engagement] using report ${reportType}:`, JSON.stringify(fields));
+        _engagementCache.set(cacheKey, { fields, time: Date.now() });
         return fields;
       }
     } catch (err) {
-      console.log(`[Engagement] report/getTotal (type=${reportType}) error:`, err.message);
+      console.log(`[Engagement] report ${reportType} error:`, err.message);
     }
   }
 
@@ -268,9 +258,7 @@ export async function fetchReactions(session, windowStart) {
   const fields = await fetchEngagementReport(session, windowStart, now);
 
   if (fields) {
-    // Look for reaction-related fields
-    for (const key of ['count_reaction_clicked', 'reaction_clicked',
-                       'reactions', 'total_reactions', 'count_reactions']) {
+    for (const key of ['count_reaction_clicked', 'reaction_clicked']) {
       if (fields[key] && parseInt(fields[key], 10) > 0) {
         return parseInt(fields[key], 10);
       }
@@ -287,52 +275,12 @@ export async function fetchChat(session, windowStart) {
   const fields = await fetchEngagementReport(session, windowStart, now);
 
   if (fields) {
-    // Look for chat-related fields
-    for (const key of ['count_group_message_sent', 'group_message_sent',
-                       'chat_messages', 'total_chat_messages', 'count_chat_messages']) {
+    for (const key of ['count_group_chat_messages_sent', 'count_group_message_sent',
+                       'group_message_sent']) {
       if (fields[key] && parseInt(fields[key], 10) > 0) {
         return parseInt(fields[key], 10);
       }
     }
-  }
-
-  // Fallback: try TOP_USERS_WEBCAST (40009) getTable — has per-user chat counts
-  try {
-    const url = `${session.serviceUrl}/api_v3/service/report/action/getTable`;
-    const params = new URLSearchParams({
-      ks: session.currentKS,
-      format: '1',
-      reportType: '40009',
-      'reportInputFilter[objectType]': 'KalturaReportInputFilter',
-      'reportInputFilter[entryIdIn]': session.entryId,
-      'reportInputFilter[fromDate]': String(windowStart),
-      'reportInputFilter[toDate]': String(now),
-      'pager[pageSize]': '500',
-      'pager[pageIndex]': '1',
-    });
-    const { data } = await axios.post(url, params.toString(), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
-    console.log('[Chat] report/getTable (type=40009) raw:', JSON.stringify(data));
-
-    if (!isKSError(data) && !isServiceForbidden(data) && data?.header && data?.data) {
-      const headers = data.header.split(',');
-      const chatIdx = headers.findIndex(h =>
-        /chat|message_sent|group_message/i.test(h)
-      );
-      if (chatIdx >= 0) {
-        // Sum across all users (rows separated by ;)
-        const rows = data.data.split(';');
-        let total = 0;
-        for (const row of rows) {
-          const vals = row.split(',');
-          total += parseInt(vals[chatIdx] || '0', 10);
-        }
-        if (total > 0) return total;
-      }
-    }
-  } catch (err) {
-    console.log('[Chat] report/getTable (type=40009) error:', err.message);
   }
 
   return 0;
@@ -345,9 +293,7 @@ export async function fetchQuestions(session, windowStart) {
   const fields = await fetchEngagementReport(session, windowStart, now);
 
   if (fields) {
-    // Look for Q&A-related fields
-    for (const key of ['count_qna', 'qna', 'questions', 'total_questions',
-                       'count_questions', 'q_and_a']) {
+    for (const key of ['count_q_and_a_threads', 'count_qna', 'q_and_a']) {
       if (fields[key] && parseInt(fields[key], 10) > 0) {
         return parseInt(fields[key], 10);
       }
