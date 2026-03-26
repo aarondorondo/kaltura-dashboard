@@ -103,41 +103,12 @@ function isKSError(data) {
 export async function fetchViewers(session) {
   if (session.disabledServices.has('viewers')) return 0;
 
-  // Primary: liveStats/collect
-  try {
-    const url = `${session.serviceUrl}/api_v3/service/liveStats/action/collect`;
-    const params = {
-      ks: session.currentKS,
-      entryId: session.entryId,
-      eventType: 1,
-      clientVer: '3.0',
-      eventIndex: 1,
-      referrer: 'analytics-dashboard',
-      partnerId: session.partnerId,
-      format: 1,
-    };
-    const { data } = await axios.get(url, { params });
-    console.log('[Viewers] liveStats/collect raw response:', JSON.stringify(data));
-
-    if (isKSError(data)) {
-      const retry = await handleKSError(session, data.code, () => fetchViewers(session));
-      if (retry !== null) return retry;
-      return 0;
-    }
-
-    if (data && typeof data === 'object' && data.concurrentViewers != null && data.concurrentViewers > 0) {
-      return data.concurrentViewers;
-    }
-  } catch (err) {
-    console.log('[Viewers] liveStats/collect error:', err.message);
-  }
-
-  // Fallback: liveReports/getEvents
+  // Primary: liveReports/getEvents — returns live audience counts
   try {
     const url = `${session.serviceUrl}/api_v3/service/liveReports/action/getEvents`;
     const params = new URLSearchParams({
       ks: session.currentKS,
-      reportType: '13',
+      reportType: 'LIVE_STREAM_STATS',
       'filter[objectType]': 'KalturaLiveReportInputFilter',
       'filter[entryIds]': session.entryId,
       format: '1',
@@ -153,12 +124,62 @@ export async function fetchViewers(session) {
       return 0;
     }
 
-    if (data?.objects?.length > 0) {
+    if (isServiceForbidden(data)) {
+      // Try fallback below
+    } else if (data?.objects?.length > 0) {
       const obj = data.objects[0];
-      return obj.audience || obj.plays || 0;
+      const count = obj.audience || obj.plays || obj.dve || 0;
+      if (count > 0) return count;
     }
   } catch (err) {
     console.log('[Viewers] liveReports/getEvents error:', err.message);
+  }
+
+  // Fallback: analytics/query — broader analytics API
+  try {
+    const url = `${session.serviceUrl}/api_v3/service/analytics/action/query`;
+    const now = Math.floor(Date.now() / 1000);
+    const params = new URLSearchParams({
+      ks: session.currentKS,
+      format: '1',
+      'filter[objectType]': 'KalturaAnalyticsFilter',
+      'filter[entryIdIn]': session.entryId,
+      'filter[fromTime]': String(now - 120),
+      'filter[toTime]': String(now),
+      'filter[metrics]': 'count_viewers',
+      'filter[dimensions]': 'entry_id',
+    });
+    const { data } = await axios.post(url, params.toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+    console.log('[Viewers] analytics/query raw response:', JSON.stringify(data));
+
+    if (isKSError(data)) {
+      const retry = await handleKSError(session, data.code, () => fetchViewers(session));
+      if (retry !== null) return retry;
+      return 0;
+    }
+
+    if (data?.objects?.length > 0) {
+      const obj = data.objects[0];
+      return parseInt(obj.count_viewers || obj.viewers || 0, 10);
+    }
+  } catch (err) {
+    console.log('[Viewers] analytics/query error:', err.message);
+  }
+
+  // Last resort: entry metadata — check if live and has plays
+  try {
+    const url = `${session.serviceUrl}/api_v3/service/media/action/get`;
+    const { data } = await axios.get(url, {
+      params: { ks: session.currentKS, entryId: session.entryId, format: 1 },
+    });
+    if (data?.plays != null && data.plays > 0) {
+      console.log(`[Viewers] media/get plays=${data.plays}, currentBroadcastStartTime=${data.currentBroadcastStartTime}`);
+      return data.plays;
+    }
+  } catch (err) {
+    console.log('[Viewers] media/get fallback error:', err.message);
   }
 
   return 0;
@@ -167,39 +188,56 @@ export async function fetchViewers(session) {
 async function fetchCuepoints(session, tag, serviceKey, windowStart) {
   if (session.disabledServices.has(serviceKey)) return 0;
 
-  const url = `${session.serviceUrl}/api_v3/service/cuepoint_cuepoint/action/list`;
-  const params = new URLSearchParams({
-    ks: session.currentKS,
-    format: '1',
-    'filter[objectType]': 'KalturaAnnotationFilter',
-    'filter[entryIdEqual]': session.entryId,
-    'filter[tagsLike]': tag,
-    'filter[createdAtGreaterThanOrEqual]': String(windowStart),
-    'pager[pageSize]': '1',
-  });
+  // Try with KalturaCuePointFilter first (broader), then KalturaAnnotationFilter
+  const filters = [
+    { objectType: 'KalturaCuePointFilter', tagField: 'tagsLike' },
+    { objectType: 'KalturaAnnotationFilter', tagField: 'tagsLike' },
+  ];
 
-  const { data } = await axios.post(url, params.toString(), {
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  });
-  console.log(`[${serviceKey}] cuepoint/list raw response:`, JSON.stringify(data));
+  for (const filter of filters) {
+    try {
+      const url = `${session.serviceUrl}/api_v3/service/cuepoint_cuepoint/action/list`;
+      const params = new URLSearchParams({
+        ks: session.currentKS,
+        format: '1',
+        'filter[objectType]': filter.objectType,
+        'filter[entryIdEqual]': session.entryId,
+        [`filter[${filter.tagField}]`]: tag,
+        'filter[createdAtGreaterThanOrEqual]': String(windowStart),
+        'pager[pageSize]': '1',
+      });
 
-  if (isKSError(data)) {
-    const retry = await handleKSError(session, data.code, () =>
-      fetchCuepoints(session, tag, serviceKey, windowStart),
-    );
-    if (retry !== null) return retry;
-    return 0;
+      const { data } = await axios.post(url, params.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+      console.log(`[${serviceKey}] cuepoint/list (${filter.objectType}) raw response:`, JSON.stringify(data));
+
+      if (isKSError(data)) {
+        const retry = await handleKSError(session, data.code, () =>
+          fetchCuepoints(session, tag, serviceKey, windowStart),
+        );
+        if (retry !== null) return retry;
+        return 0;
+      }
+
+      if (isServiceForbidden(data)) {
+        continue; // try next filter
+      }
+
+      if (data?.totalCount != null) {
+        return data.totalCount;
+      }
+    } catch (err) {
+      console.log(`[${serviceKey}] cuepoint/list (${filter.objectType}) error:`, err.message);
+    }
   }
 
-  if (isServiceForbidden(data)) {
-    session.disabledServices.add(serviceKey);
-    const warning = `${serviceKey.charAt(0).toUpperCase() + serviceKey.slice(1)} API not available on this account (showing 0).`;
-    if (!session.warnings.includes(warning)) session.warnings.push(warning);
-    console.log(`[${serviceKey}] SERVICE_FORBIDDEN — disabled for this session`);
-    return 0;
-  }
-
-  return data?.totalCount ?? 0;
+  // All filters failed
+  session.disabledServices.add(serviceKey);
+  const warning = `${serviceKey.charAt(0).toUpperCase() + serviceKey.slice(1)} API not available on this account (showing 0).`;
+  if (!session.warnings.includes(warning)) session.warnings.push(warning);
+  console.log(`[${serviceKey}] All cuepoint filters failed — disabled for this session`);
+  return 0;
 }
 
 export async function fetchReactions(session, windowStart) {
@@ -276,7 +314,11 @@ export async function pollTick(session) {
   if (session.status === 'complete' || session.status === 'error') return;
 
   const tickStart = Date.now();
-  const windowStart = Math.floor(tickStart / 1000) - session.pollIntervalMs / 1000;
+  // Look back from when monitoring started (cumulative count), not just the poll interval
+  const monitoringStartSec = session.monitoringSince
+    ? Math.floor(new Date(session.monitoringSince).getTime() / 1000)
+    : Math.floor(tickStart / 1000) - 3600; // default: 1 hour lookback
+  const windowStart = monitoringStartSec;
 
   // Refresh KS if needed (credentials mode only)
   try {
